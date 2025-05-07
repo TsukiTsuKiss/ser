@@ -1291,8 +1291,8 @@ class InteractiveViewer:
             screen_height = 720 # デフォルト値
 
         # --- 目標初期ウィンドウサイズ計算 (画面の50%) --- 
-        target_w = screen_width * 0.5
-        target_h = screen_height * 0.5
+        target_w = screen_width * 0.4 # 0.5 から変更
+        target_h = screen_height * 0.4 # 0.5 から変更
 
         # --- 元画像の縦横比を保ちつつ、目標サイズに合わせる --- 
         initial_width = 640 # デフォルト
@@ -1323,33 +1323,43 @@ class InteractiveViewer:
         win_w = initial_width
         win_h = initial_height
 
+        # Define offsets for the entire grid
+        offset_x = 20
+        offset_y = 20
+
         # Top Row Windows
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(self.window_name, win_w, win_h)
-        cv2.moveWindow(self.window_name, 0, 0) # Top-Left
+        cv2.moveWindow(self.window_name, offset_x, offset_y) # Top-Left
+
+        # Define spacing
+        h_spacing = 75  # Horizontal spacing (reverted from 55)
+        v_spacing = 100 # Vertical spacing (remains 100)
 
         cv2.namedWindow(self.dark_preview_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(self.dark_preview_window_name, win_w, win_h)
-        cv2.moveWindow(self.dark_preview_window_name, win_w + 5, 0) # Top-Center
+        cv2.moveWindow(self.dark_preview_window_name, offset_x + win_w + h_spacing, offset_y) # Top-Center
 
         can_debayer_initial = self.color_id in [8, 9, 10, 11]
         if can_debayer_initial:
             cv2.namedWindow(self.debayer_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
             cv2.resizeWindow(self.debayer_window_name, win_w, win_h)
-            cv2.moveWindow(self.debayer_window_name, win_w * 2 + 10, 0) # Top-Right
+            # Reverting to the previous formula for right column spacing
+            cv2.moveWindow(self.debayer_window_name, offset_x + win_w * 2 + h_spacing + (h_spacing // 2), offset_y) # Top-Right
 
         # Bottom Row Windows (Raw Stack, Dark Sub Stack, Debayered Dark Sub Stack)
         cv2.namedWindow(self.raw_stack_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(self.raw_stack_window_name, win_w, win_h)
-        cv2.moveWindow(self.raw_stack_window_name, 0, win_h + 40) # Bottom-Left
+        cv2.moveWindow(self.raw_stack_window_name, offset_x, offset_y + win_h + v_spacing) # Bottom-Left
 
         cv2.namedWindow(self.dark_sub_stack_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(self.dark_sub_stack_window_name, win_w, win_h)
-        cv2.moveWindow(self.dark_sub_stack_window_name, win_w + 5, win_h + 40) # Bottom-Center
+        cv2.moveWindow(self.dark_sub_stack_window_name, offset_x + win_w + h_spacing, offset_y + win_h + v_spacing) # Bottom-Center
 
         cv2.namedWindow(self.debayer_stack_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(self.debayer_stack_window_name, win_w, win_h)
-        cv2.moveWindow(self.debayer_stack_window_name, win_w * 2 + 10, win_h + 40) # Bottom-Right
+        # Reverting to the previous formula for right column spacing
+        cv2.moveWindow(self.debayer_stack_window_name, offset_x + win_w * 2 + h_spacing + (h_spacing // 2), offset_y + win_h + v_spacing) # Bottom-Right
 
         # Register mouse callback for the main window (for ROI selection)
         # Pass window dimensions as param for coordinate scaling in callback
@@ -1401,12 +1411,28 @@ class InteractiveViewer:
                 # --- Resize frame to window size FIRST ---
                 # Get current actual window size (image area)
                 win_rect = cv2.getWindowImageRect(self.window_name)
-                current_win_w = win_rect[2]
-                current_win_h = win_rect[3]
-                # Fallback if rect is invalid (e.g., window minimized)
-                if current_win_w <= 0 or current_win_h <= 0:
-                    current_win_w = win_w # Use initial size as fallback
+                rect_w = win_rect[2]
+                rect_h = win_rect[3]
+
+                # Define a threshold for "too small".
+                # win_w and win_h are the dimensions initially passed to cv2.resizeWindow().
+                # If the reported usable area is significantly smaller than this, or invalid,
+                # we'll assume the initially intended dimensions for rendering.
+                # This might lead to clipping if the window cannot actually be that size,
+                # but is preferred over scaling the image down to be unviewable.
+                min_threshold_w = max(100, win_w // 4) # Fallback if reported width is less than 1/4 of desired or 100px
+                min_threshold_h = max(100, win_h // 4) # Fallback if reported height is less than 1/4 of desired or 100px
+
+                if rect_w < min_threshold_w or rect_h < min_threshold_h or rect_w <= 0 or rect_h <= 0:
+                    current_win_w = win_w
                     current_win_h = win_h
+                    # Log if the fallback was due to small size, not just invalid (<=0)
+                    if not (rect_w <= 0 or rect_h <= 0) and (rect_w < min_threshold_w or rect_h < min_threshold_h):
+                        if hasattr(self, '_add_log') and callable(self._add_log): # Defensive check
+                            self._add_log(f"WM reported small rect {rect_w}x{rect_h}, using target {win_w}x{win_h}")
+                else:
+                    current_win_w = rect_w
+                    current_win_h = rect_h
 
                 try:
                     display_frame_resized = cv2.resize(display_frame_to_process, (current_win_w, current_win_h), interpolation=cv2.INTER_NEAREST)
